@@ -1,12 +1,13 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
-import { StyleSheet, View, Text } from 'react-native';
+import { StyleSheet, View, Text, Switch } from 'react-native';
 import { COLORS, TYPOGRAPHY } from '../constants/theme';
 import { AvailableOrdersScreen } from '../screens/AvailableOrdersScreen';
 import { ActiveTripScreen } from '../screens/ActiveTripScreen';
 import { TripHistoryScreen } from '../screens/TripHistoryScreen';
 import { useTripStore } from '../store/useTripStore';
+import { navigationRef } from '../utils/NavigationUtils';
 
 export type RootTabParamList = {
   AvailableOrders: undefined;
@@ -18,9 +19,33 @@ const Tab = createBottomTabNavigator<RootTabParamList>();
 
 const TabIcon = ({ emoji, focused }: { emoji: string; focused: boolean }) => (
   <View style={[styles.tabIconContainer, focused && styles.tabIconContainerFocused]}>
-    <Text style={[styles.tabIcon, { opacity: focused ? 1.0 : 0.6 }]}>{emoji}</Text>
+    <Text style={[styles.tabIcon, focused ? styles.tabIconFocused : styles.tabIconUnfocused]}>{emoji}</Text>
   </View>
 );
+
+const HeaderRight = () => {
+  const isConnected = useTripStore((state) => state.isConnected);
+  const setConnected = useTripStore((state) => state.setConnected);
+  return (
+    <View style={styles.headerRightContainer}>
+      <Text style={[styles.connectionText, { color: isConnected ? COLORS.success : COLORS.error }]}>
+        {isConnected ? 'ONLINE' : 'OFFLINE'}
+      </Text>
+      <Switch
+        value={isConnected}
+        onValueChange={setConnected}
+        trackColor={{ false: COLORS.border, true: COLORS.primaryLight }}
+        thumbColor={isConnected ? COLORS.primary : COLORS.textMuted}
+        ios_backgroundColor={COLORS.border}
+        style={styles.switchTransform}
+      />
+    </View>
+  );
+};
+
+const renderAvailableOrdersIcon = ({ focused }: { focused: boolean }) => <TabIcon emoji="📋" focused={focused} />;
+const renderActiveTripIcon = ({ focused }: { focused: boolean }) => <TabIcon emoji="🚚" focused={focused} />;
+const renderTripHistoryIcon = ({ focused }: { focused: boolean }) => <TabIcon emoji="📜" focused={focused} />;
 
 export const AppNavigator = () => {
   const activeTrip = useTripStore((state) => state.activeTrip);
@@ -41,7 +66,7 @@ export const AppNavigator = () => {
   };
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Tab.Navigator
         screenOptions={{
           headerStyle: {
@@ -55,6 +80,7 @@ export const AppNavigator = () => {
             ...TYPOGRAPHY.h2,
             color: COLORS.textPrimary,
           },
+          headerRight: HeaderRight,
           tabBarStyle: {
             backgroundColor: COLORS.surface,
             borderTopWidth: 1,
@@ -77,7 +103,7 @@ export const AppNavigator = () => {
           options={{
             title: 'Available Orders',
             tabBarLabel: 'Orders',
-            tabBarIcon: ({ focused }) => <TabIcon emoji="📋" focused={focused} />,
+            tabBarIcon: renderAvailableOrdersIcon,
           }}
         />
         <Tab.Screen
@@ -86,7 +112,7 @@ export const AppNavigator = () => {
           options={{
             title: 'Active Trip',
             tabBarLabel: 'Active Trip',
-            tabBarIcon: ({ focused }) => <TabIcon emoji="🚚" focused={focused} />,
+            tabBarIcon: renderActiveTripIcon,
             tabBarBadge: getActiveTripBadge(),
             tabBarBadgeStyle: {
               backgroundColor: syncStatus === 'failed' ? COLORS.error : (syncStatus === 'pending' ? COLORS.info : COLORS.primary),
@@ -102,7 +128,7 @@ export const AppNavigator = () => {
           options={{
             title: 'Trip History',
             tabBarLabel: 'History',
-            tabBarIcon: ({ focused }) => <TabIcon emoji="📜" focused={focused} />,
+            tabBarIcon: renderTripHistoryIcon,
           }}
         />
       </Tab.Navigator>
@@ -124,4 +150,24 @@ const styles = StyleSheet.create({
   tabIcon: {
     fontSize: 20,
   },
+  tabIconFocused: {
+    opacity: 1.0,
+  },
+  tabIconUnfocused: {
+    opacity: 0.6,
+  },
+  headerRightContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  connectionText: {
+    ...TYPOGRAPHY.caption,
+    fontWeight: 'bold',
+    marginRight: 6,
+  },
+  switchTransform: {
+    transform: [{ scaleX: 0.85 }, { scaleY: 0.85 }],
+  },
 });
+

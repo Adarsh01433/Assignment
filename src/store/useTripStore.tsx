@@ -1,12 +1,8 @@
-
-
-
 import { create } from 'zustand';
 import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
-import { createMMKV, MMKV } from 'react-native-mmkv';
-import { Order, TripStatus, ActiveTrip, PendingUpdate, HistoricalTrip, TripSyncStatus } from '../types';
+import { createMMKV } from 'react-native-mmkv';
+import { Order, TripStatus, ActiveTrip, PendingUpdate, HistoricalTrip } from '../types';
 import { updateTripStatus } from '../api/tripApi';
-
 
 // Initialize MMKV
 const storage = createMMKV();
@@ -24,8 +20,6 @@ const mmkvStorage: StateStorage = {
     storage.remove(name);
   },
 };
-
-
 
 const INITIAL_ORDERS: Order[] = [
   {
@@ -126,7 +120,6 @@ const INITIAL_ORDERS: Order[] = [
   },
 ];
 
-
 interface TripState {
   availableOrders: Order[];
   activeTrip: ActiveTrip | null;
@@ -137,7 +130,6 @@ interface TripState {
   showSummaryModal: boolean;
   lastCompletedTrip: HistoricalTrip | null;
 
-  
   // Actions
   setConnected: (isConnected: boolean) => void;
   refreshOrders: () => Promise<void>;
@@ -147,8 +139,6 @@ interface TripState {
   processPendingUpdate: () => Promise<void>;
   dismissSummaryModal: () => void;
   resetAll: () => void;
-
-
 }
 
 const getNextStatus = (currentStatus: TripStatus): TripStatus | null => {
@@ -165,3 +155,223 @@ const getNextStatus = (currentStatus: TripStatus): TripStatus | null => {
       return null;
   }
 };
+
+export const useTripStore = create<TripState>()(
+  persist(
+    (set, get) => ({
+      availableOrders: INITIAL_ORDERS,
+      activeTrip: null,
+      history: [],
+      pendingUpdate: null,
+      isConnected: true,
+      isRefreshingOrders: false,
+      showSummaryModal: false,
+      lastCompletedTrip: null,
+
+      setConnected: (isConnected) => {
+        const wasOffline = !get().isConnected;
+        set({ isConnected });
+        
+        // If transitioning from offline to online, trigger pending sync
+        if (wasOffline && isConnected && get().pendingUpdate) {
+          get().processPendingUpdate();
+        }
+      },
+
+      refreshOrders: async () => {
+        set({ isRefreshingOrders: true });
+        // Simulate network delay
+        await new Promise<void>((resolve) => setTimeout(() => resolve(), 1500));
+        
+        // Populate orders, filter out currently active trip if any
+        const activeTrip = get().activeTrip;
+        const activeOrderId = activeTrip?.order.id;
+        
+        const filteredInitial = INITIAL_ORDERS.filter(
+          (o) => o.id !== activeOrderId
+        );
+        
+        // If we want random new orders we can do that, or just reset the list
+        set({
+          availableOrders: filteredInitial,
+          isRefreshingOrders: false,
+        });
+      },
+
+      acceptOrder: (orderId) => {
+        const { activeTrip, availableOrders } = get();
+        if (activeTrip) {
+          return; // Already has an active trip
+        }
+
+        const order = availableOrders.find((o) => o.id === orderId);
+        if (!order) {
+          return;
+        }
+
+        set({
+          activeTrip: {
+            order,
+            status: 'ACCEPTED',
+            syncStatus: 'idle',
+          },
+          availableOrders: availableOrders.filter((o) => o.id !== orderId),
+        });
+      },
+
+      advanceTripStatus: async () => {
+        const { activeTrip, pendingUpdate } = get();
+        if (!activeTrip || activeTrip.syncStatus === 'pending' || pendingUpdate) {
+          return; // Lock duplicate submits or invalid states
+        }
+
+        const nextStatus = getNextStatus(activeTrip.status);
+        if (!nextStatus) {
+          return;
+        }
+
+        // 1. Set state to pending and record pending update
+        set({
+          activeTrip: {
+            ...activeTrip,
+            syncStatus: 'pending',
+            error: undefined,
+          },
+          pendingUpdate: {
+            tripId: activeTrip.order.id,
+            targetStatus: nextStatus,
+            timestamp: Date.now(),
+          },
+        });
+
+        // 2. Process
+        await get().processPendingUpdate();
+      },
+
+      retrySync: async () => {
+        const { activeTrip, pendingUpdate } = get();
+        if (!activeTrip || activeTrip.syncStatus !== 'failed' || !pendingUpdate) {
+          return;
+        }
+
+        set({
+          activeTrip: {
+            ...activeTrip,
+            syncStatus: 'pending',
+            error: undefined,
+          },
+        });
+
+        await get().processPendingUpdate();
+      },
+
+      processPendingUpdate: async () => {
+        const { pendingUpdate, activeTrip, isConnected } = get();
+        if (!pendingUpdate || !activeTrip) {
+          return;
+        }
+
+        // If offline, don't even call api, set to failed with network message
+        if (!isConnected) {
+          set({
+            activeTrip: {
+              ...activeTrip,
+              syncStatus: 'failed',
+              error: 'Offline: Status update will resume when connection is restored',
+            },
+          });
+          return;
+        }
+
+        try {
+          const result = await updateTripStatus(pendingUpdate.tripId, pendingUpdate.targetStatus);
+          
+          // Successful transition
+          const currentActiveTrip = get().activeTrip;
+          if (!currentActiveTrip) {
+            return;
+          }
+
+          if (result.status === 'DELIVERED') {
+            const completedTrip: HistoricalTrip = {
+              id: `${result.tripId}-${result.syncedAt}`,
+              orderId: currentActiveTrip.order.id,
+              pickupArea: currentActiveTrip.order.pickupArea,
+              dropArea: currentActiveTrip.order.dropArea,
+              distanceKm: currentActiveTrip.order.distanceKm,
+              payout: currentActiveTrip.order.payout,
+              deliveredAt: result.syncedAt,
+            };
+
+            set({
+              activeTrip: {
+                ...currentActiveTrip,
+                status: 'DELIVERED',
+                syncStatus: 'idle',
+              },
+              history: [completedTrip, ...get().history],
+              lastCompletedTrip: completedTrip,
+              showSummaryModal: true,
+              pendingUpdate: null,
+            });
+          } else {
+            set({
+              activeTrip: {
+                ...currentActiveTrip,
+                status: result.status,
+                syncStatus: 'idle',
+              },
+              pendingUpdate: null,
+            });
+          }
+        } catch (error: any) {
+          // Handle error
+          const currentActiveTrip = get().activeTrip;
+          if (!currentActiveTrip) {
+            return;
+          }
+
+          set({
+            activeTrip: {
+              ...currentActiveTrip,
+              syncStatus: 'failed',
+              error: error.message || 'Failed to update status',
+            },
+          });
+        }
+      },
+
+      dismissSummaryModal: () => {
+        set({
+          activeTrip: null,
+          lastCompletedTrip: null,
+          showSummaryModal: false,
+        });
+      },
+
+      resetAll: () => {
+        set({
+          availableOrders: INITIAL_ORDERS,
+          activeTrip: null,
+          history: [],
+          pendingUpdate: null,
+          showSummaryModal: false,
+          lastCompletedTrip: null,
+        });
+      },
+    }),
+    {
+      name: 'trip-storage',
+      storage: createJSONStorage(() => mmkvStorage),
+      // Only persist core sync state and history. We exclude ephemeral UI/connection states.
+      partialize: (state) => ({
+        availableOrders: state.availableOrders,
+        activeTrip: state.activeTrip,
+        history: state.history,
+        pendingUpdate: state.pendingUpdate,
+        showSummaryModal: state.showSummaryModal,
+        lastCompletedTrip: state.lastCompletedTrip,
+      }),
+    }
+  )
+);
