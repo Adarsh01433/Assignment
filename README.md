@@ -1,97 +1,106 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Logistics Driver & Trip Management Mobile App (React Native)
 
-# Getting Started
+A resilient, offline-first delivery driver application built with **React Native**, **Zustand**, and **MMKV storage**. The app is engineered specifically to handle real-world network reliability issues—such as failed status updates, transient network drops, and offline queueing—with graceful state recovery.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+---
 
-## Step 1: Start Metro
+## 🚀 How to Run It
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+### Prerequisites
+- Node.js (>= 18)
+- React Native CLI environment setup (Android Studio / Xcode / CocoaPods for iOS)
+- Android Emulator or iOS Simulator / Physical Device
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+### Installation Steps
 
-```sh
-# Using npm
-npm start
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/Adarsh01433/Assignment.git
+   cd Assignment
+   ```
 
-# OR using Yarn
-yarn start
-```
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-## Step 2: Build and run your app
+3. **iOS Setup (macOS only):**
+   ```bash
+   cd ios && pod install && cd ..
+   ```
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+4. **Start Metro Bundler:**
+   ```bash
+   npm start
+   ```
 
-### Android
+5. **Run on Android / iOS:**
+   - For Android:
+     ```bash
+     npm run android
+     ```
+   - For iOS:
+     ```bash
+     npm run ios
+     ```
 
-```sh
-# Using npm
-npm run android
+---
 
-# OR using Yarn
-yarn android
-```
+## 🛡️ Approach to Handling Failed Status Updates
 
-### iOS
+In real-world logistics, drivers frequently transit through low-connectivity zones (elevators, basements, remote roads). A single status update failure should **never corrupt state** or **lose driver progress**.
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+### Key Architectural Concepts & Mechanics:
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+1. **Optimistic Locking & State Isolation (`syncStatus`)**:
+   - Every trip status progression (`ACCEPTED` ➔ `ARRIVED_AT_PICKUP` ➔ `PICKED_UP` ➔ `ARRIVED_AT_DROP` ➔ `DELIVERED`) transitions through `syncStatus: 'pending'`.
+   - Action buttons are immediately locked during network calls to prevent duplicate requests or race conditions.
 
-```sh
-bundle install
-```
+2. **Pending Update Queue (`PendingUpdate`)**:
+   - Before attempting any network request, the target state transition is recorded in persistent memory (`pendingUpdate`).
+   - If the network call fails or times out (simulated 30% failure rate in `tripApi.ts`), the app updates `syncStatus` to `'failed'` and attaches the explicit error message.
 
-Then, and every time you update your native dependencies, run:
+3. **Offline Awareness & Resiliency**:
+   - A toggle in the app header allows simulating **ONLINE / OFFLINE** network states.
+   - When offline, attempts to advance status immediately queue the update and transition to a warm offline banner explaining that sync will automatically resume upon reconnect.
+   - Re-establishing connection (`setConnected(true)`) automatically triggers `processPendingUpdate()` to attempt syncing without manual driver intervention.
 
-```sh
-bundle exec pod install
-```
+4. **Manual Retry & Recovery Path**:
+   - In case of network failure while online, an explicit **"Retry Sync"** button is rendered on the active trip screen allowing the driver to re-trigger the sync manually without re-entering data or losing trip progress.
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+5. **State Persistence with MMKV**:
+   - App state is backed by `MMKV` via Zustand's `persist` middleware.
+   - Even if the app crashes, is closed, or loses power during a `'failed'` or `'pending'` status sync, the exact pending state and failure context are rehydrated upon re-launch.
 
-```sh
-# Using npm
-npm run ios
+---
 
-# OR using Yarn
-yarn ios
-```
+## 🔮 What I'd Do Differently or Add With More Time
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+1. **Exponential Backoff & Automatic Retry Mechanism**:
+   - Implement an automated background retry queue (e.g., using exponential backoff strategy) so failed updates retry automatically 3-5 times before requiring user intervention.
+2. **Idempotency Keys**:
+   - Include unique UUID idempotency keys for each status transition request to ensure the backend never processes duplicate updates if network packets are re-sent.
+3. **Interactive Maps & Geofencing**:
+   - Integrate `react-native-maps` with geofence triggers to automatically prompt status updates (e.g., auto-detecting arrival within 50 meters of pickup/drop area).
+4. **Comprehensive Test Suite**:
+   - Add end-to-end integration tests using Detox / React Native Testing Library covering offline-to-online transitions and retry state flows.
+5. **WebSocket / Real-Time Syncing**:
+   - Implement WebSocket connections for live driver position tracking and instant server push notifications.
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+---
 
-## Step 3: Modify your app
+## 🐛 Known Bugs or Incomplete Parts
 
-Now that you have successfully run the app, let's make changes!
+- **Simulated Connection Header**: Connection toggling is currently controlled via a top-right UI switch for quick testing and demonstration purposes rather than React Native NetInfo module listener.
+- **Single Active Trip Limitation**: The app currently supports only 1 active trip per driver at a time (batching multiple pickups in one route is not yet supported).
+- **Location Permissions & GPS**: Actual device GPS coordinates are simulated via pickup/drop address strings rather than native device location APIs.
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+---
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+## 🎥 60-Second Screen Recording Demonstration
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+### Video Walkthrough Highlights (What the clip demonstrates):
+1. **Initiating Status Update**: Driver clicks on status progression (e.g., "Arrive at Pickup Location").
+2. **Simulated Failure Handled**: The network call fails (simulated 30% error or offline toggle), displaying the **Red Sync Failed Banner** & setting `syncStatus` to `'failed'`.
+3. **Graceful Recovery**: Driver taps **"Retry Sync"** (or toggles online), the request succeeds, state updates to the next step cleanly (`ARRIVED_AT_PICKUP`), and the driver continues seamlessly to delivery completion.
 
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
