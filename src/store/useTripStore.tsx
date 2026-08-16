@@ -150,3 +150,18 @@ interface TripState {
 
 
 }
+
+const getNextStatus = (currentStatus: TripStatus): TripStatus | null => {
+  switch (currentStatus) {
+    case 'ACCEPTED':
+      return 'ARRIVED_AT_PICKUP';
+    case 'ARRIVED_AT_PICKUP':
+      return 'PICKED_UP';
+    case 'PICKED_UP':
+      return 'ARRIVED_AT_DROP';
+    case 'ARRIVED_AT_DROP':
+      return 'DELIVERED';
+    default:
+      return null;
+  }
+};
